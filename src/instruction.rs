@@ -4,10 +4,14 @@ use core::slice;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Register {
-    Rax = 0xC0,
-    Rdx = 0xC2,
-    Rsi = 0xC6,
-    Rdi = 0xC7,
+    Rax = 0, // Register code 0
+    Rcx = 1, // Register code 1
+    Rdx = 2, // Register code 2
+    Rbx = 3, // Register code 3
+    Rsp = 4, // Register code 4
+    Rbp = 5, // Register code 5
+    Rsi = 6, // Register code 6
+    Rdi = 7, // Register code 7
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,9 +33,24 @@ impl Instruction {
         let mut instruction = Instruction::new();
         let mut buf = Buf::new(&mut instruction.bytes);
 
-        buf.write(b"\x48\xc7");
-        buf.write(&[register as u8]);
+        buf.write(b"\x48\xC7"); // Opcode prefix + opcode
+        let modrm = 0xC0 | (0 << 3) | (register as u8); // ModR/M: Mod=11 (register), Reg=0 (opcode extension /0 implied by C7), R/M=register
+        buf.write(&[modrm]);
         buf.write(&value.to_le_bytes());
+
+        instruction.len = 2 + 1 + 4;
+        instruction
+    }
+
+    /// lea reg64, m (RIP-relative addressing)
+    pub const fn lea_rip_relative(register: Register, displacement: u32) -> Self {
+        let mut instruction = Instruction::new();
+        let mut buf = Buf::new(&mut instruction.bytes);
+
+        buf.write(b"\x48\x8D"); // Opcode prefix + opcode
+        let modrm = 0x00 | ((register as u8) << 3) | 0x05; // ModR/M: Mod=00, Reg=register, R/M=101 (RIP-relative)
+        buf.write(&[modrm]);
+        buf.write(&displacement.to_le_bytes());
 
         instruction.len = 2 + 1 + 4;
         instruction
@@ -41,12 +60,9 @@ impl Instruction {
         let mut instruction = Instruction::new();
         let mut buf = Buf::new(&mut instruction.bytes);
 
-        match (left, right) {
-            (Register::Rdi, Register::Rdi) => {
-                buf.write(b"\x48\x31\xFF");
-            }
-            _ => unreachable!(),
-        }
+        buf.write(b"\x48\x31"); // Opcode prefix + opcode
+        let modrm = 0xC0 | ((left as u8) << 3) | (right as u8); // ModR/M: Mod=11 (register), Reg=left, R/M=right
+        buf.write(&[modrm]);
 
         instruction.len = 3;
         instruction

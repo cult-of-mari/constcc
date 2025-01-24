@@ -4,7 +4,7 @@ use super::program_header::ProgramHeader;
 use super::section_header::SectionHeader;
 use crate::io::Buf;
 use core::mem::offset_of;
-use core::{panic, ptr};
+use core::ptr;
 use std::ffi::CStr;
 
 const EXEC: u32 = 1;
@@ -12,13 +12,17 @@ const WRITE: u32 = 2;
 const READ: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(align(0x1000), C)]
+struct Align<T>(pub T);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct Elf {
     header: ElfHeader,
-    program_headers: [ProgramHeader; 3],
+    program_headers: [ProgramHeader; 2],
     section_headers: [SectionHeader; 4],
-    code: [u8; 42],
-    read_only_data: [u8; 12],
+    code: Align<[u8; 42]>,
+    read_only_data: [u8; 13],
     strings_table: [u8; 25],
 }
 
@@ -31,7 +35,7 @@ impl Elf {
     pub const READ_ONLY_DATA_OFFSET: u64 = offset_of!(Self, read_only_data) as u64;
     pub const CODE_OFFSET: u64 = offset_of!(Self, code) as u64;
 
-    pub const STRINGS: [&CStr; 4] = [c".text", c".rodata", c".shshrtab", c""];
+    pub const STRINGS: [&CStr; 4] = [c"", c".text", c".rodata", c".shstrtab"];
 
     pub const STRINGS_INDICIES: [u32; 4] = {
         let mut indices = [0; 4];
@@ -65,11 +69,11 @@ impl Elf {
     };
 
     pub const fn new() -> Self {
-        let mut read_only_data = [0; 12];
+        let mut read_only_data = [0; 13];
         let mut code = [0; 42];
 
         {
-            let input = *b"hello world~";
+            let input = *b"hello world~\n";
             let mut index = 0;
 
             while index < input.len() {
@@ -79,7 +83,7 @@ impl Elf {
         }
 
         let program_headers = [
-            ProgramHeader {
+            /*ProgramHeader {
                 flags: READ,
                 offset: 0,
                 memory_size: 0x188,
@@ -88,7 +92,7 @@ impl Elf {
                 physical_addr: 0x0000000000400000,
                 align: 0x1000,
                 ..ProgramHeader::new()
-            },
+            },*/
             ProgramHeader {
                 flags: EXEC | READ,
                 offset: Self::CODE_OFFSET,
@@ -114,16 +118,16 @@ impl Elf {
         let section_headers = [
             SectionHeader {
                 kind: super::section_header::Kind::Null,
-                name: Self::STRINGS_INDICIES[3],
+                name: Self::STRINGS_INDICIES[0],
                 ..SectionHeader::new()
             },
             SectionHeader {
                 kind: super::section_header::Kind::ProgramData,
                 offset: Self::CODE_OFFSET,
                 size: code.len() as u64,
-                name: Self::STRINGS_INDICIES[0],
+                name: Self::STRINGS_INDICIES[1],
                 flags: 2 | 4,
-                addr: program_headers[1].virtual_addr,
+                addr: program_headers[0].virtual_addr,
                 addr_align: 1,
                 ..SectionHeader::new()
             },
@@ -131,9 +135,9 @@ impl Elf {
                 kind: super::section_header::Kind::ProgramData,
                 offset: Self::READ_ONLY_DATA_OFFSET,
                 size: read_only_data.len() as u64,
-                name: Self::STRINGS_INDICIES[1],
+                name: Self::STRINGS_INDICIES[2],
                 flags: 2,
-                addr: program_headers[2].virtual_addr,
+                addr: program_headers[1].virtual_addr,
                 addr_align: 1,
                 ..SectionHeader::new()
             },
@@ -141,7 +145,7 @@ impl Elf {
                 kind: super::section_header::Kind::StringTable,
                 offset: Self::STRINGS_TABLE_OFFSET,
                 size: Self::STRINGS_TABLE.len() as u64,
-                name: Self::STRINGS_INDICIES[2],
+                name: Self::STRINGS_INDICIES[3],
                 addr_align: 1,
                 ..SectionHeader::new()
             },
@@ -150,7 +154,7 @@ impl Elf {
         let instructions = [
             Instruction::mov(Register::Rax, 0x01),
             Instruction::mov(Register::Rdi, 0x01),
-            Instruction::mov(Register::Rsi, section_headers[2].addr as u32),
+            Instruction::lea_rip_relative(Register::Rsi, 0xFEB),
             Instruction::mov(Register::Rdx, section_headers[2].size as u32),
             Instruction::syscall(),
             Instruction::mov(Register::Rax, 0x3C),
@@ -182,7 +186,7 @@ impl Elf {
             section_headers,
             strings_table: Self::STRINGS_TABLE,
             read_only_data,
-            code,
+            code: Align(code),
         }
     }
 
